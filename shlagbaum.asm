@@ -1,0 +1,326 @@
+.include "tn2313def.inc"
+;FLAGS
+.EQU	FLAGS		=GPIOR0
+.EQU	T5		=0
+.EQU	T10		=1
+.EQU	UP		=2
+.EQU	DOWN		=3
+.EQU	KEY		=4
+.EQU	PHOTO		=5
+
+;INPUTS
+.EQU	_DOWN		=PB0
+.EQU	_UP		=PD6
+.EQU	_PHOTO		=PB2
+.EQU	_KEY		=PB1
+
+;OUTPUTS
+.EQU	OPEN_		=PB4
+.EQU	CLOSE_		=PB3
+
+.DEF	SAVE_SREG	=R0
+.DEF	TEMP_L		=R16
+.DEF	TEMP_H		=R17
+.DEF	DELAY_L		=R18
+.DEF	DELAY_H		=R19
+.DEF	FOR_TMR		=R20
+
+
+.ORG	0
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	TMR10_INT
+	rjmp	RESET
+	rjmp	TMR5_INT
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+	rjmp	RESET
+RESET:
+
+INIT_STACK:
+	cli
+	ldi	TEMP_L,RAMEND
+	out	SPL,TEMP_L
+
+	ldi	TEMP_L,0b11100111
+	out	PORTB,TEMP_L
+	ldi	TEMP_L,0b11111000
+	out	DDRB,TEMP_L
+
+	ldi	TEMP_L,0b11111111
+	out	PORTD,TEMP_L
+	ldi	TEMP_L,0b10111111
+	out	DDRD,TEMP_L
+
+	clr	TEMP_L
+	out	FLAGS,TEMP_L
+
+MAIN:
+	rcall	DELAY_200mS
+	rcall	DELAY_200mS
+	rcall	DELAY_200mS
+
+
+CLOSED_STATE:
+	rcall	OPEN_OFF
+	rcall	CLOSE_OFF
+CLOSED_STATE_LOOP:
+	rcall	ASK_KEY
+	sbis	FLAGS,KEY
+	rjmp	CLOSED_STATE_LOOP
+	cbi	FLAGS,KEY
+	rjmp	TO_OPEN_STATE
+
+OPENED_STATE:
+	rcall	OPEN_OFF
+	rcall	T10_ENABLE
+	rcall	T5_ENABLE
+OPENED_STATE_LOOP:
+	rcall	ASK_PHOTO
+	sbic	FLAGS,PHOTO
+	rcall	T5_ENABLE
+	sbis	FLAGS,T10
+	rjmp	OPENED_STATE_LOOP
+	sbis	FLAGS,T5
+	rjmp	OPENED_STATE_LOOP
+OPENED_STATE_ACT:
+	rjmp	TO_CLOSE_STATE
+
+
+
+
+TO_CLOSE_STATE:
+	rcall	CLOSE_ON
+	rcall	T5_ENABLE
+TO_CLOSE_STATE_LOOOP:
+	rcall	ASK_PHOTO
+	rcall	ASK_KEY
+	rcall	ASK_DOWN
+
+	sbic	FLAGS,PHOTO
+	rjmp	TO_OPEN_STATE
+	sbic	FLAGS,KEY
+	rjmp	TO_OPEN_STATE
+	sbic	FLAGS,DOWN
+	rjmp	CLOSED_STATE
+	sbic	FLAGS,T5
+	rjmp	CLOSED_STATE
+	
+	rjmp	TO_CLOSE_STATE_LOOOP	
+
+
+TO_OPEN_STATE:
+	rcall	CLOSE_OFF
+	rcall	DELAY_200mS
+	rcall	DELAY_200mS
+	rcall	OPEN_ON
+	rcall	T5_ENABLE
+TO_OPEN_STATE_LOOP:
+	rcall	ASK_UP
+	sbic	FLAGS,T5
+	rjmp	TO_OPEN_STATE_ACT
+	sbic	FLAGS,UP
+	rjmp	TO_OPEN_STATE_LOOP
+
+TO_OPEN_STATE_ACT:
+	rjmp	OPENED_STATE
+
+
+
+
+
+
+
+
+;===========================================
+;READY CODE
+;===========================================
+T5_ENABLE:
+	cli
+	cbi	FLAGS,T5
+
+	ldi	FOR_TMR,20
+
+	ldi	TEMP_L,0b00000101	; CLK/1024
+	out	TCCR0B,TEMP_L
+
+	clr	TEMP_L			; CLEAR COUNTER
+	out	TCNT0,TEMP_L
+
+	in	TEMP_L,TIMSK		; SET OCIE1A
+	ori	TEMP_L,0b00000010
+	out	TIMSK,TEMP_L
+
+	sei
+	ret
+
+TMR5_INT:
+	push	TEMP_L	
+	in	SAVE_SREG,SREG
+	dec	FOR_TMR
+	brne	TMR5_INT_RET
+
+	in	TEMP_L,TIMSK		; CLEAR OCIE1A
+	andi	TEMP_L,0b11111101
+	out	TIMSK,TEMP_L
+	sbi	FLAGS,T5
+TMR5_INT_RET:
+	pop	TEMP_L	
+	out	SREG,SAVE_SREG
+	reti
+
+T10_ENABLE:
+	cli
+	cbi	FLAGS,T10
+
+	ldi	TEMP_L,0b00000100	; CLK/1024
+	out	TCCR1B,TEMP_L
+
+	ldi	TEMP_L,0xF4		; SET COMPARE REGISTER FOR 1S
+	out	OCR1AL,TEMP_L
+	ldi	TEMP_L,0x50
+	out	OCR1AH,TEMP_L
+
+	clr	TEMP_L			; CLEAR COUNTER
+	out	TCNT1L,TEMP_L
+	out	TCNT1H,TEMP_L
+
+	in	TEMP_L,TIMSK		; SET OCIE1A
+	ori	TEMP_L,0b01000000
+	out	TIMSK,TEMP_L
+
+	sei
+	ret
+
+TMR10_INT:
+	push	TEMP_L	
+	in	SAVE_SREG,SREG
+
+	in	TEMP_L,TIMSK		; CLEAR OCIE1A
+	andi	TEMP_L,0b10111111
+	out	TIMSK,TEMP_L
+
+	sbi	FLAGS,T10
+
+	pop	TEMP_L	
+	out	SREG,SAVE_SREG
+	reti
+
+ASK_PHOTO:
+	clr	TEMP_H
+	ldi	TEMP_L,100
+ASK_PHOTO_:
+	rcall	DELAY
+	sbis	PINB,_PHOTO
+	inc	TEMP_H
+	dec	TEMP_L
+	brne	ASK_PHOTO_
+	cpi	TEMP_H,50
+	brlo	IS_NOT_PHOTO
+IS_PHOTO:
+	cbi	FLAGS,PHOTO
+	ret
+IS_NOT_PHOTO:
+	sbi	FLAGS,PHOTO
+	ret
+
+ASK_KEY:
+	clr	TEMP_H
+	ldi	TEMP_L,100
+ASK_KEY_:
+	rcall	DELAY
+	sbis	PINB,_KEY
+	inc	TEMP_H
+	dec	TEMP_L
+	brne	ASK_KEY_
+	cpi	TEMP_H,50
+	brlo	IS_NOT_KEY
+IS_KEY:
+	cbi	FLAGS,KEY
+	ret
+IS_NOT_KEY:
+	sbi	FLAGS,KEY
+	ret
+
+
+ASK_UP:
+	clr	TEMP_H
+	ldi	TEMP_L,10
+ASK_UP_:
+	rcall	DELAY
+	sbis	PIND,_UP
+	inc	TEMP_H
+	dec	TEMP_L
+	brne	ASK_UP_
+	cpi	TEMP_H,3
+	brlo	IS_NOT_UP
+IS_UP:
+	sbi	FLAGS,UP	
+	ret
+IS_NOT_UP:
+	cbi	FLAGS,UP
+	ret
+
+ASK_DOWN:
+	clr	TEMP_H
+	ldi	TEMP_L,20
+ASK_DOWN_:
+	rcall	DELAY
+	sbis	PINB,_DOWN
+	inc	TEMP_H
+	dec	TEMP_L
+	brne	ASK_DOWN_
+	cpi	TEMP_H,3
+	brlo	IS_NOT_DOWN
+IS_DOWN:
+	cbi	FLAGS,DOWN
+	ret
+IS_NOT_DOWN:
+	sbi	FLAGS,DOWN
+	ret
+
+OPEN_ON:
+	sbi	PORTB,OPEN_
+	ret
+OPEN_OFF:
+	cbi	PORTB,OPEN_
+	ret
+CLOSE_ON:
+	sbi	PORTB,CLOSE_
+	ret
+CLOSE_OFF:
+	cbi	PORTB,CLOSE_
+	ret
+
+DELAY:	; 0.7 mS
+	ldi	DELAY_H,1
+DELAY_:
+	ldi	DELAY_L,255
+DELAY__:
+	dec	DELAY_L
+	brne	DELAY__
+	dec	DELAY_H
+	brne	DELAY_
+	ret
+
+DELAY_200mS:	
+	ldi	DELAY_H,255
+DELAY_200mS_:
+	ldi	DELAY_L,255
+DELAY_200mS__:
+	dec	DELAY_L
+	brne	DELAY_200mS__
+	dec	DELAY_H
+	brne	DELAY_200mS_
+	ret
